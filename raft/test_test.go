@@ -513,7 +513,6 @@ loop:
 }
 
 func TestPersist12C(t *testing.T) {
-return
 	servers := 3
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
@@ -560,7 +559,6 @@ return
 }
 
 func TestPersist22C(t *testing.T) {
-return
 	servers := 5
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
@@ -607,7 +605,6 @@ return
 }
 
 func TestPersist32C(t *testing.T) {
-return
 	servers := 3
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
@@ -648,7 +645,6 @@ return
 // haven't been committed yet.
 //
 func TestFigure82C(t *testing.T) {
-return
 	servers := 5
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
@@ -705,7 +701,6 @@ return
 }
 
 func TestUnreliableAgree2C(t *testing.T) {
-return
 	servers := 5
 	cfg := make_config(t, servers, true)
 	defer cfg.cleanup()
@@ -783,14 +778,13 @@ func TestFigure8Unreliable2C(t *testing.T) {
 			cfg.connect(i)
 		}
 	}
-	fmt.Printf("all connect\n")
 	cfg.one(rand.Int()%10000, servers, true)
 
 	fmt.Printf("  ... Passed\n")
 }
 
 func internalChurn(t *testing.T, unreliable bool) {
-return
+
 	if unreliable {
 		fmt.Printf("Test (2C): unreliable churn ...\n")
 	} else {

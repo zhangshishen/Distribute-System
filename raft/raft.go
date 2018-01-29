@@ -20,7 +20,7 @@ package raft
 
 
 import (
-	"fmt"
+	//"fmt"
 	"sync"
 	"labrpc"
 	"time"
@@ -110,7 +110,7 @@ type ResponseArg struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) AppendEntries(req *RequestArg,res *ResponseArg){
-    fmt.Printf("%d received term %d entry from %d,term %d\n",rf.me,rf.term,req.LeaderID,req.Term)
+    //fmt.Printf("%d received term %d entry from %d,term %d\n",rf.me,rf.term,req.LeaderID,req.Term)
     rf.mu.Lock()
     defer rf.mu.Unlock()
 
@@ -151,13 +151,11 @@ func (rf *Raft) AppendEntries(req *RequestArg,res *ResponseArg){
         if(rf.curHaveLog < req.LeaderCommit){
             for i:= rf.commitIndex+1;i<rf.curHaveLog+1;i++{
                 rf.applyCh<- ApplyMsg{CommandIndex:i,Command:rf.log[i].Command,CommandValid:true}
-
             }
             rf.commitIndex = rf.curHaveLog
         }else{
             for i:= rf.commitIndex+1;i<req.LeaderCommit+1;i++{
                 rf.applyCh<- ApplyMsg{CommandIndex:i,Command:rf.log[i].Command,CommandValid:true}
-
             }
             rf.commitIndex = req.LeaderCommit
         }
@@ -217,7 +215,7 @@ func (rf *Raft) waitForElection(i int){
             if(res.Success==true){
                 rf.curElect++
                 if(rf.curElect+1>len(rf.peers)/2){
-                    fmt.Printf("%d become leader\n",rf.me)
+                    //fmt.Printf("%d become leader\n",rf.me)
                     close(rf.requestForVoteChan)
                     rf.state = 4
                     for i,_ := range rf.peers{
@@ -244,7 +242,7 @@ func (rf *Raft) startElection(){
         rf.voteFor = rf.me
         rf.curElect = 0
     rf.mu.Unlock()
-    fmt.Printf("%d start election\n",rf.me)
+    //fmt.Printf("%d start election\n",rf.me)
     for i,_ := range rf.peers{
         if(i!=rf.me){
             go rf.waitForElection(i)
@@ -314,9 +312,7 @@ func (rf *Raft) testCommit(){
 }
 func (rf *Raft) SendEntriesTo(i int){
     
-    fmt.Printf("%d send entries to %d,term %d,in %d\n",rf.me,i,rf.term,int(makeTimestamp()))
     rf.mu.Lock()
-    fmt.Printf("%d start sending entries to %d,term %d,in %d\n",rf.me,i,rf.term,int(makeTimestamp()))
     curterm := rf.term
     if(rf.state!=4){
         rf.mu.Unlock()
@@ -449,7 +445,6 @@ func (rf *Raft) readPersist(data []byte) {
                 reply.Success = false
             }
             if(rf.term<args.Term){
-                    
                 if(reply.Success==true){
                     rf.term = args.Term
                     rf.voteFor = args.CandidateId
