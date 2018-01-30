@@ -1,11 +1,14 @@
 package raftkv
 
 import (
+	"fmt"
 	"labgob"
 	"labrpc"
 	"log"
 	"raft"
+	"strconv"
 	"sync"
+	"time"
 )
 
 const Debug = 0
@@ -16,7 +19,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	}
 	return
 }
-
 
 type Op struct {
 	// Your definitions here.
@@ -29,19 +31,93 @@ type KVServer struct {
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
+	index   int
 
+	storage      map[string]string
+	clientChan   map[string]chan int
 	maxraftstate int // snapshot if log grows this big
 
+	notify    chan int
+	isWaiting bool
 	// Your definitions here.
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+
+}
+
+func (kv *KVServer) ReceiveChan() {
+	for applyMsg := range kv.applyCh {
+		kv.mu.Lock()
+		kv.index = applyMsg.CommandIndex
+		args := PutAppendArgs(applyMsg.Command)
+		if kv.storage[args.Name] == nil {
+			//first time a client commit
+			kv.storage[args.Name] = "0"
+		}
+		if strconv.Atoi(kv.storage[args.Name]) >= args.ClientIndex {
+			//have already apply
+			continue
+		} else {
+			if strconv.Atoi(kv.storage[args.Name]) == args.ClientIndex-1 {
+
+				kv.storage[args.Name] = strconv.Itoa(strconv.Atoi(kv.storage[args.Name]) + 1) //update index
+
+				if args.Op == "Append" {
+					kv.storage[args.Key] += args.Value
+				} else {
+					kv.storage[args.Key] = args.Value
+				}
+
+				if kv.clientChan[args.Name] != nil { //notify receiver
+					close(kv.clientChan[args.Name])
+					kv.clientChan[args.Name] = nil
+				}
+			} else {
+				fmt.Printf("error, raft server have holes\n")
+			}
+		}
+		kv.mu.Unlock()
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	//TODO
+	if kv.clientChan[args.Name] != nil {
+		fmt.Printf("already have chan\n")
+	}
+	kv.clientChan[args.Name] = make(chan int, 1)
+
+	index, term, isLeader := kv.rf.Start( /**/ )
+
+	if !isLeader {
+		kv.clientChan[args.Name] = nil
+		reply.WrongLeader = true
+		reply.Err = "Is Not Leader"
+		return
+	}
+
+	for {
+		select {
+		case <-kv.clientChan[args.Name]:
+			if strconv.Atoi(kv.storage[args.Name]) >= args.ClientIndex {
+				reply.WrongLeader = false
+				reply.Err = nil
+				break
+			} else {
+				kv.clientChan[args.Name] = make(chan int, 1)
+			}
+		case <-time.After(time.Millisecond * 100):
+			kv.clientChan[args.Name] = nil
+			reply.WrongLeader = true
+			reply.Err = "Time Out"
+			break
+
+		}
+	}
+
 }
 
 //
