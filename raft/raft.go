@@ -36,6 +36,7 @@ import (
 
 type ApplyMsg struct {
 	Index        int
+	Term		 int
 	CommandValid bool
 	CommandIndex int
 	Command      interface{}
@@ -146,12 +147,12 @@ func (rf *Raft) AppendEntries(req *RequestArg, res *ResponseArg) {
 		//fmt.Printf("cur have %d log,PrevLogIndex = %d\n",rf.curHaveLog,req.PrevLogIndex)
 		if rf.curHaveLog < req.LeaderCommit {
 			for i := rf.commitIndex + 1; i < rf.curHaveLog+1; i++ {
-				rf.applyCh <- ApplyMsg{CommandIndex: i, Command: rf.log[i].Command, CommandValid: true}
+				rf.applyCh <- ApplyMsg{Term:rf.term,CommandIndex: i, Command: rf.log[i].Command, CommandValid: true}
 			}
 			rf.commitIndex = rf.curHaveLog
 		} else {
 			for i := rf.commitIndex + 1; i < req.LeaderCommit+1; i++ {
-				rf.applyCh <- ApplyMsg{CommandIndex: i, Command: rf.log[i].Command, CommandValid: true}
+				rf.applyCh <- ApplyMsg{Term:rf.term,CommandIndex: i, Command: rf.log[i].Command, CommandValid: true}
 			}
 			rf.commitIndex = req.LeaderCommit
 		}
@@ -295,7 +296,7 @@ func (rf *Raft) testCommit() {
 			}
 		}
 		if sum > len(rf.peers)/2 {
-			rf.applyCh <- ApplyMsg{CommandIndex: rf.commitIndex + 1, Command: rf.log[rf.commitIndex+1].Command, CommandValid: true}
+			rf.applyCh <- ApplyMsg{Term:rf.term,CommandIndex: rf.commitIndex + 1, Command: rf.log[rf.commitIndex+1].Command, CommandValid: true}
 			rf.commitIndex++
 		} else {
 			return

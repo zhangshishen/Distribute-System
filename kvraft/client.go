@@ -3,11 +3,15 @@ package raftkv
 import "labrpc"
 import "crypto/rand"
 import "math/big"
+import "strconv"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
+	
 	// You will have to modify this struct.
-	id int64
+	name string
+	frontLeader int
+	index	int
 }
 
 func nrand() int64 {
@@ -20,8 +24,11 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.frontLeader = -1
+	ck.index = 1
 	// You'll have to add code here.
-	ck.id = nrand()
+	ck.name = strconv.Itoa(int(nrand()))
+
 	return ck
 }
 
@@ -37,10 +44,25 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 //
-func (ck *Clerk) Get(key string) string {
 
+
+//put and get will run synchronize ?
+//
+func (ck *Clerk) Get(key string) string {
+	
+	args := GetArgs{Key:key,Name:ck.name}
+	reply := GetReply{}
+	for{
+		for i,k := range ck.servers {
+			k.Call("KVServer.Get",&args,&reply)
+			if(reply.WrongLeader==false) {
+				ck.servers[0],ck.servers[i] = ck.servers[i],ck.servers[0] 
+				return reply.Value
+			}
+		}
+	}
 	// You will have to modify this function.
-	return ""
+	
 }
 
 //

@@ -13,6 +13,10 @@ import (
 
 const Debug = 0
 
+const (
+	FOLLOWER int = iota
+	LEADER
+)
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
 		log.Printf(format, a...)
@@ -31,28 +35,55 @@ type KVServer struct {
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
-	index   int
-
+	state	int
+	
 	storage      map[string]string
-	clientChan   map[string]chan int
+	ClientChan   map[string]chan int
+
 	maxraftstate int // snapshot if log grows this big
+	leaderTerm   int // test if lose leadership
 
 	notify    chan int
+	changeLeader chan int
 	isWaiting bool
 	// Your definitions here.
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	kv.mu.Lock()
+	putArg := PutAppendArgs{Op:"Get",Name:args.Name,ClientIndex:args.ClientIndex}
+	kv.mu.Unlock()
+
+	rep := GetReply{}
+	kv.PutAppend(&putArg,&rep)
+
+	if(rep.WrongLeader==false){
+		reply.Value = storage[args.Key]
+		reply.WrongLeader = false
+	}else{
+		reply.WrongLeader = true
+	}
 
 }
 
 func (kv *KVServer) ReceiveChan() {
 	for applyMsg := range kv.applyCh {
+
+		
 		kv.mu.Lock()
-		kv.index = applyMsg.CommandIndex
+		if kv.state==LEADER && applyMsg.Term!=leaderTerm {	//test if lose leadership
+			close(kv.changeLeader)
+			kv.state = FOLLOWER
+		}
+
 		args := PutAppendArgs(applyMsg.Command)
-		if kv.storage[args.Name] == nil {
+		if args.Op == "Get" && kv.clientChan[args.Name] != nil{
+			go func(m chan int){<-m}(kv.clientChan[args.Name])
+			continue
+		}
+		kv.mu.Unlock()
+		if kv.storage[args.Name] == "" {
 			//first time a client commit
 			kv.storage[args.Name] = "0"
 		}
@@ -66,49 +97,71 @@ func (kv *KVServer) ReceiveChan() {
 
 				if args.Op == "Append" {
 					kv.storage[args.Key] += args.Value
-				} else {
+				} else if args.Op == "Put"{
 					kv.storage[args.Key] = args.Value
 				}
-
-				if kv.clientChan[args.Name] != nil { //notify receiver
-					close(kv.clientChan[args.Name])
-					kv.clientChan[args.Name] = nil
+				kv.mu.Lock()
+				if kv.clientChan[args.Name] != nil  { //notify receiver
+					go func(m chan int){<-m}(kv.clientChan[args.Name])
 				}
+				kv.mu.Unlock()
 			} else {
 				fmt.Printf("error, raft server have holes\n")
 			}
 		}
-		kv.mu.Unlock()
+
 	}
 }
-
+// what if a server has lost leadership and not realize ,so a client will always been block
+//
+// 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	//TODO
+	// TODO
 	if kv.clientChan[args.Name] != nil {
 		fmt.Printf("already have chan\n")
 	}
-	kv.clientChan[args.Name] = make(chan int, 1)
+	
 
 	index, term, isLeader := kv.rf.Start( /**/ )
 
-	if !isLeader {
-		kv.clientChan[args.Name] = nil
+	kv.mu.Lock()
+	if (!isLeader)||(kv.leaderTerm!=term) {
+		if(kv.state==LEADER){	
+			kv.state=FOLLOWER
+			close(kv.changeLeader)
+		}
 		reply.WrongLeader = true
 		reply.Err = "Is Not Leader"
+		kv.mu.Unlock()
 		return
+	}else {
+		// is leader (at least I think I am)
+		kv.clientChan[args.Name] = make(chan int)
+		if(kv.state==FOLLOWER){
+			kv.leaderTerm = term
+			kv.state=LEADER
+			kv.changeLeader = make(chan int)
+		}
 	}
+	kv.mu.Unlock()
 
 	for {
 		select {
-		case <-kv.clientChan[args.Name]:
+		case <-kv.changeLeader:				//lose leadership
+			reply.WrongLeader = true
+			reply.Err = "Is Not Leader"
+			break
+		case kv.clientChan[args.Name]<-1:	//normal commit
 			if strconv.Atoi(kv.storage[args.Name]) >= args.ClientIndex {
 				reply.WrongLeader = false
 				reply.Err = nil
+				close(kv.ClientChan[args.Name])
+				kv.ClientChan[args.Name] = nil
 				break
 			} else {
-				kv.clientChan[args.Name] = make(chan int, 1)
-		}
+				//kv.clientChan[args.Name] = make(chan int, 1)
+			}
 	}
 
 }
@@ -145,12 +198,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
-
+	kv.state = FOLLOWER
 	// You may need initialization code here.
+
+	kv.storage = make(map[string]string)
+	kv.ClientChan = make(map[string](chan int))
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
+	go kv.ReceiveChan()
 	// You may need initialization code here.
 
 	return kv
