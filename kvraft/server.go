@@ -108,13 +108,6 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 				break
 			} else {
 				kv.clientChan[args.Name] = make(chan int, 1)
-			}
-		case <-time.After(time.Millisecond * 100):
-			kv.clientChan[args.Name] = nil
-			reply.WrongLeader = true
-			reply.Err = "Time Out"
-			break
-
 		}
 	}
 
