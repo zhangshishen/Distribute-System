@@ -24,6 +24,12 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+type Args struct {
+	Term 	string
+	ClientIndex	int
+	Name string
+}
+
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
@@ -43,10 +49,10 @@ type KVServer struct {
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
-	state   int
+	prevTerm int
 
 	storage    map[string]string
-	clientChan map[string]chan int
+	clientChan map[string]chan Args
 
 	maxraftstate int // snapshot if log grows this big
 	leaderTerm   int // test if lose leadership
@@ -80,22 +86,17 @@ func (kv *KVServer) ReceiveChan() {
 		kv.mu.Lock()
 
 		args := applyMsg.Command.(Op)
-		if kv.state == LEADER && applyMsg.Term != kv.leaderTerm { //test if lose leadership
-			close(kv.changeLeader)
-			kv.state = FOLLOWER
-			kv.clientChan[args.Name] = nil
-		}
-
-		if args.Op == "Get" {
-			//fmt.Printf("Get success\n")
-			if kv.clientChan[args.Name] != nil {
-				//fmt.Printf("client %s:index %d get success %s:%s\n", args.Name, args.ClientIndex, args.Key, args.Value)
-				go func(m chan int) { <-m }(kv.clientChan[args.Name])
+		if kv.prevTerm < applyMsg.Term {
+			kv.prevTerm = applyMsg.Term
+			for k,v := kv.clientChan {
+				arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
+				v <- arg
 			}
-
-			kv.mu.Unlock()
-			//fmt.Printf("%d\t finish received commit\n", kv.me)
-			continue
+		}else {
+			if kv.clientChan[args.Name]!=nil{
+				kv.clientChan[args.Name] <- Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
+			}
+			
 		}
 
 		if kv.storage[args.Name] == "" {
@@ -117,11 +118,6 @@ func (kv *KVServer) ReceiveChan() {
 				} else if args.Op == "Put" {
 					kv.storage[args.Key] = args.Value
 				}
-
-				if kv.clientChan[args.Name] != nil { //notify receiver
-					//fmt.Printf("client %s:index %d commit success %s:%s\n", args.Name, args.ClientIndex, args.Key, args.Value)
-					go func(m chan int) { <-m }(kv.clientChan[args.Name])
-				}
 				kv.mu.Unlock()
 			} else {
 				//fmt.Printf("error, raft server have holes\n")
@@ -140,12 +136,12 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	reply.Err = "not been modified"
 
 	kv.mu.Lock()
-	kv.clientChan[args.Name] = make(chan int)
+	kv.clientChan[args.Name] = make(chan Args)
 	kv.mu.Unlock()
 
 	defer func() {
 		kv.mu.Lock()
-		kv.clientChan[args.Name] = nil
+		delete(kv.clientChan,args.Name)
 		kv.mu.Unlock()
 	}()
 	//fmt.Printf("start put append\n")
@@ -157,64 +153,29 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		ClientIndex: args.ClientIndex}
 
 	_, term, isLeader := kv.rf.Start(op)
-
-	kv.mu.Lock()
+	
+	
 	//fmt.Printf("start put append\n")
-	reply.WrongLeader = true
-	if (!isLeader) || (kv.leaderTerm != term) {
+	if !isLeader {
 		//fmt.Printf("is not leader\n")
-		if kv.state == LEADER {
-			kv.state = FOLLOWER
-			close(kv.changeLeader)
-		}
 		reply.WrongLeader = true
 		reply.Err = "Is Not Leader"
 		//fmt.Printf("finish put append,not leader\n")
-		kv.mu.Unlock()
+		
 		return
-	} else {
-		// is leader (at least I think I am)
-		//fmt.Printf("%s is leader\n", args.Name)
-
-		if kv.state == FOLLOWER {
-			kv.leaderTerm = term
-			kv.state = LEADER
-			kv.changeLeader = make(chan int)
-		}
-	}
+	} 
 	//fmt.Printf("finish put append\n")
 
-	kv.mu.Unlock()
-	//defer fmt.Printf("finish append %s:%s\n", args.Key, args.Name)
 	for {
-		select {
-		case <-kv.changeLeader: //lose leadership
-			reply.WrongLeader = true
-			kv.mu.Lock()
-			close(kv.clientChan[args.Name])
-			kv.clientChan[args.Name] = nil
-			kv.mu.Unlock()
-			reply.Err = "Change Leader"
-			fmt.Printf("lose leader\n")
+		result <- kv.clientChan[args.Name]
+		if(result.ClientIndex == args.ClientIndex && result.Name == args.Name ){
+			reply.WrongLeader = false
 			return
-		case kv.clientChan[args.Name] <- 1: //normal commit
-			//fmt.Printf("%d\t return success\n", kv.me)
-			kv.mu.Lock()
-			m, _ := strconv.Atoi(kv.storage[args.Name])
-			if m >= args.ClientIndex {
-				fmt.Printf("%d\t finish return %s\n", kv.me, args.Key)
-				//defer fmt.Printf("%d\t has been return\n", kv.me)
-				reply.WrongLeader = false
-				reply.Err = "success"
-				close(kv.clientChan[args.Name])
-				kv.clientChan[args.Name] = nil
-				kv.mu.Unlock()
-				return
-			} else {
-				fmt.Printf("error\n")
-				kv.mu.Unlock()
-				//kv.clientChan[args.Name] = make(chan int, 1)
-			}
+		}
+		if(result.Term > term){
+			reply.WrongLeader = true
+			reply.Err = "Change Term"
+			return
 		}
 	}
 
@@ -253,6 +214,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 	kv.state = FOLLOWER
+	kv.prevTerm = -1
 	// You may need initialization code here.
 
 	kv.storage = make(map[string]string)
