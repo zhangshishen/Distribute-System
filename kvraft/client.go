@@ -1,17 +1,20 @@
 package raftkv
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
-import "strconv"
+import (
+	"crypto/rand"
+	"fmt"
+	"labrpc"
+	"math/big"
+	"strconv"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	
+
 	// You will have to modify this struct.
-	name string
+	name        string
 	frontLeader int
-	index	int
+	index       int
 }
 
 func nrand() int64 {
@@ -45,24 +48,29 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 
-
 //put and get will run synchronize ?
 //
 func (ck *Clerk) Get(key string) string {
-	
-	args := GetArgs{Key:key,Name:ck.name}
-	reply := GetReply{}
-	for{
-		for i,k := range ck.servers {
-			k.Call("KVServer.Get",&args,&reply)
-			if(reply.WrongLeader==false) {
-				ck.servers[0],ck.servers[i] = ck.servers[i],ck.servers[0] 
+	fmt.Printf("%s\t start to get %s\n", ck.name, key)
+	args := GetArgs{Key: key, Name: ck.name}
+	for {
+		for i, k := range ck.servers {
+			reply := GetReply{}
+			ok := k.Call("KVServer.Get", &args, &reply)
+			if !ok {
+				continue
+			}
+			if reply.WrongLeader == false {
+				ck.servers[0], ck.servers[i] = ck.servers[i], ck.servers[0]
+				fmt.Printf("%s\t get value success %s\n", ck.name, reply.Value)
 				return reply.Value
+			} else {
+				//fmt.Printf("%s\t get value failed \n", ck.name)
 			}
 		}
 	}
 	// You will have to modify this function.
-	
+
 }
 
 //
@@ -78,6 +86,28 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
 	//ID from 1
+	fmt.Printf("%s\t start to %s %s:%s\n", ck.name, op, key, value)
+	args := PutAppendArgs{Key: key, Value: value, Op: op, Name: ck.name, ClientIndex: ck.index}
+
+	for {
+		for i, k := range ck.servers {
+			reply := PutAppendReply{}
+			//fmt.Printf("%s\t start to put %s\n", ck.name, key)
+			ok := k.Call("KVServer.PutAppend", &args, &reply)
+			//fmt.Printf("%s\t finished to put %s\n", ck.name, key)
+			if !ok {
+				continue
+			}
+			if reply.WrongLeader == false {
+				fmt.Printf("%s\t %s %s:%s success\n", ck.name, op, key, value)
+				ck.servers[0], ck.servers[i] = ck.servers[i], ck.servers[0]
+				ck.index++
+				return
+			} else {
+				//fmt.Printf("%s\t put %s failed,error = %s,reply = %d\n", ck.name, key, reply.Err, reply.WrongLeader)
+			}
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
