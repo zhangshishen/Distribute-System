@@ -8,6 +8,7 @@ import (
 	"raft"
 	"strconv"
 	"sync"
+	"time"
 )
 
 const Debug = 0
@@ -25,7 +26,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type Args struct {
-	Term 	string
+	Term 	int
 	ClientIndex	int
 	Name string
 }
@@ -85,9 +86,9 @@ func (kv *KVServer) ReceiveChan() {
 		args := applyMsg.Command.(Op)
 		if kv.prevTerm < applyMsg.Term {
 			kv.prevTerm = applyMsg.Term
-			for k,v := kv.clientChan {
+			for _,v := range kv.clientChan {
 				arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
-				go func(a Args){v <- a}(arg)
+				go func(a Args,va chan Args){va <- a}(arg,v)
 			}
 		}else {
 			if kv.clientChan[args.Name]!=nil{
@@ -135,13 +136,13 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
 	kv.clientChan[args.Name] = make(chan Args)
 	kv.mu.Unlock()
-
+	//defer fmt.Printf("finish waiting\n")
 	defer func() {
 		kv.mu.Lock()
 		delete(kv.clientChan,args.Name)
 		kv.mu.Unlock()
 	}()
-	//fmt.Printf("start put append\n")
+	fmt.Printf("start put append\n")
 	//defer fmt.Printf("finish put append\n")
 	op := Op{Key: args.Key,
 		Value:       args.Value,
@@ -151,29 +152,39 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	_, term, isLeader := kv.rf.Start(op)
 	
-	
+	fmt.Printf("%s waiting\n",args.Name)
 	//fmt.Printf("start put append\n")
 	if !isLeader {
 		//fmt.Printf("is not leader\n")
 		reply.WrongLeader = true
 		reply.Err = "Is Not Leader"
-		//fmt.Printf("finish put append,not leader\n")
+		fmt.Printf("not leader\n")
 		
 		return
 	} 
-	//fmt.Printf("finish put append\n")
-
+	//fmt.Printf("%s waiting\n",args.Name)
+	
 	for {
-		result <- kv.clientChan[args.Name]
-		if(result.ClientIndex == args.ClientIndex && result.Name == args.Name ){
-			reply.WrongLeader = false
-			return
+		//var result Args
+		select {
+			case result:=  <- kv.clientChan[args.Name]:
+				if(result.ClientIndex == args.ClientIndex && result.Name == args.Name ){
+					reply.WrongLeader = false
+					return
+				}
+				if(result.Term > term){
+					reply.WrongLeader = true
+					reply.Err = "Change Term"
+					return
+				}
+			case <-time.After(time.Millisecond*200):
+					reply.WrongLeader = true
+					return
 		}
-		if(result.Term > term){
-			reply.WrongLeader = true
-			reply.Err = "Change Term"
-			return
-		}
+		//result := <- kv.clientChan[args.Name]
+		fmt.Printf("%s have entries\n",args.Name)
+		
+		
 	}
 
 }
@@ -210,12 +221,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
-	kv.state = FOLLOWER
+	
 	kv.prevTerm = -1
 	// You may need initialization code here.
 
 	kv.storage = make(map[string]string)
-	kv.clientChan = make(map[string](chan int))
+	kv.clientChan = make(map[string](chan Args))
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
