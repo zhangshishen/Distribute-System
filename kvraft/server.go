@@ -1,7 +1,7 @@
 package raftkv
 
 import (
-	"fmt"
+	//"fmt"
 	"labgob"
 	"labrpc"
 	"log"
@@ -82,17 +82,16 @@ func (kv *KVServer) ReceiveChan() {
 	for applyMsg := range kv.applyCh {
 		//fmt.Printf("%d\t received commit\n", kv.me)
 		kv.mu.Lock()
-
 		args := applyMsg.Command.(Op)
+		arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
 		if kv.prevTerm < applyMsg.Term {
 			kv.prevTerm = applyMsg.Term
 			for _,v := range kv.clientChan {
-				arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
 				go func(a Args,va chan Args){va <- a}(arg,v)
 			}
 		}else {
 			if kv.clientChan[args.Name]!=nil{
-				kv.clientChan[args.Name] <- Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
+				go func (a Args,va chan Args){va <- a} (arg,kv.clientChan[args.Name])
 			}
 			
 		}
@@ -110,6 +109,7 @@ func (kv *KVServer) ReceiveChan() {
 		} else {
 			if m == args.ClientIndex-1 {
 				kv.mu.Lock()
+				//fmt.Printf("%s start out\n",args.Name)
 				kv.storage[args.Name] = strconv.Itoa(m + 1) //update index
 				if args.Op == "Append" {
 					kv.storage[args.Key] += args.Value
@@ -117,6 +117,7 @@ func (kv *KVServer) ReceiveChan() {
 					kv.storage[args.Key] = args.Value
 				}
 				kv.mu.Unlock()
+				//fmt.Printf("finish out\n")
 			} else {
 				//fmt.Printf("error, raft server have holes\n")
 			}
@@ -131,34 +132,42 @@ func (kv *KVServer) ReceiveChan() {
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	// TODO
+	//fmt.Printf("%s start put append\n",args.Name)
 	reply.Err = "not been modified"
 
 	kv.mu.Lock()
+	//fmt.Printf("start out\n")
+	//fmt.Printf("%s stage 1\n",args.Name)
 	kv.clientChan[args.Name] = make(chan Args)
+	//fmt.Printf("finish out\n")
 	kv.mu.Unlock()
-	//defer fmt.Printf("finish waiting\n")
+	//defer fmt.Printf("finish append\n")
 	defer func() {
+		//fmt.Printf("%s start out\n",args.Name)
 		kv.mu.Lock()
+		//fmt.Printf("%s start out\n",args.Name)
 		delete(kv.clientChan,args.Name)
 		kv.mu.Unlock()
+		//fmt.Printf("%s finish out\n",args.Name)
 	}()
-	fmt.Printf("start put append\n")
+	//fmt.Printf("%s stage 2\n",args.Name)
+	//fmt.Printf("start put append\n")
 	//defer fmt.Printf("finish put append\n")
 	op := Op{Key: args.Key,
 		Value:       args.Value,
 		Op:          args.Op,
 		Name:        args.Name,
 		ClientIndex: args.ClientIndex}
-
+	
 	_, term, isLeader := kv.rf.Start(op)
 	
-	fmt.Printf("%s waiting\n",args.Name)
+	
 	//fmt.Printf("start put append\n")
 	if !isLeader {
 		//fmt.Printf("is not leader\n")
 		reply.WrongLeader = true
 		reply.Err = "Is Not Leader"
-		fmt.Printf("not leader\n")
+		//fmt.Printf("not leader\n")
 		
 		return
 	} 
@@ -182,7 +191,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 					return
 		}
 		//result := <- kv.clientChan[args.Name]
-		fmt.Printf("%s have entries\n",args.Name)
+		//fmt.Printf("%s have entries\n",args.Name)
 		
 		
 	}
