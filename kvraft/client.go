@@ -52,7 +52,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 //
 func (ck *Clerk) Get(key string) string {
 	fmt.Printf("%s\t start to get %s\n", ck.name, key)
-	args := GetArgs{Key: key, Name: ck.name}
+	args := GetArgs{Key: key, Name: ck.name,ClientIndex:ck.index}
 	for {
 		for i, k := range ck.servers {
 			reply := GetReply{}
@@ -63,6 +63,7 @@ func (ck *Clerk) Get(key string) string {
 			if reply.WrongLeader == false {
 				ck.servers[0], ck.servers[i] = ck.servers[i], ck.servers[0]
 				fmt.Printf("%s\t get value success %s\n", ck.name, reply.Value)
+				ck.index++
 				return reply.Value
 			} else {
 				//fmt.Printf("%s\t get value failed \n", ck.name)
