@@ -52,14 +52,11 @@ type KVServer struct {
 	prevTerm int
 
 	storage    map[string]string
-	clientChan map[string]chan Args
+	clientChan map[string](chan Args)
 
 	maxraftstate int // snapshot if log grows this big
 	leaderTerm   int // test if lose leadership
 
-	notify       chan int
-	changeLeader chan int
-	isWaiting    bool
 	// Your definitions here.
 }
 
@@ -90,7 +87,7 @@ func (kv *KVServer) ReceiveChan() {
 			kv.prevTerm = applyMsg.Term
 			for k,v := kv.clientChan {
 				arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
-				v <- arg
+				go func(a Args){v <- a}(arg)
 			}
 		}else {
 			if kv.clientChan[args.Name]!=nil{
