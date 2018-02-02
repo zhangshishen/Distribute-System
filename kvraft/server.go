@@ -26,9 +26,9 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type Args struct {
-	Term 	int
-	ClientIndex	int
-	Name string
+	Term        int
+	ClientIndex int
+	Name        string
 }
 
 type Op struct {
@@ -46,10 +46,10 @@ type Op struct {
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
+	mu       sync.Mutex
+	me       int
+	rf       *raft.Raft
+	applyCh  chan raft.ApplyMsg
 	prevTerm int
 
 	storage    map[string]string
@@ -80,20 +80,20 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) ReceiveChan() {
 	for applyMsg := range kv.applyCh {
-		//fmt.Printf("%d\t received commit\n", kv.me)
+
 		kv.mu.Lock()
 		args := applyMsg.Command.(Op)
-		arg := Args{Term:applyMsg.Term,ClientIndex:args.ClientIndex,Name:args.Name}
+		arg := Args{Term: applyMsg.Term, ClientIndex: args.ClientIndex, Name: args.Name}
 		if kv.prevTerm < applyMsg.Term {
 			kv.prevTerm = applyMsg.Term
-			for _,v := range kv.clientChan {
-				go func(a Args,va chan Args){va <- a}(arg,v)
+			for _, v := range kv.clientChan {
+				go func(a Args, va chan Args) { va <- a }(arg, v)
 			}
-		}else {
-			if kv.clientChan[args.Name]!=nil{
-				go func (a Args,va chan Args){va <- a} (arg,kv.clientChan[args.Name])
+		} else {
+			if kv.clientChan[args.Name] != nil {
+				go func(a Args, va chan Args) { va <- a }(arg, kv.clientChan[args.Name])
 			}
-			
+
 		}
 
 		if kv.storage[args.Name] == "" {
@@ -103,13 +103,10 @@ func (kv *KVServer) ReceiveChan() {
 		m, _ := strconv.Atoi(kv.storage[args.Name])
 		kv.mu.Unlock()
 		if m >= args.ClientIndex {
-			//have already apply
-			//fmt.Printf("%d\t finish received commit\n", kv.me)
 			continue
 		} else {
 			if m == args.ClientIndex-1 {
 				kv.mu.Lock()
-				//fmt.Printf("%s start out\n",args.Name)
 				kv.storage[args.Name] = strconv.Itoa(m + 1) //update index
 				if args.Op == "Append" {
 					kv.storage[args.Key] += args.Value
@@ -117,12 +114,8 @@ func (kv *KVServer) ReceiveChan() {
 					kv.storage[args.Key] = args.Value
 				}
 				kv.mu.Unlock()
-				//fmt.Printf("finish out\n")
-			} else {
-				//fmt.Printf("error, raft server have holes\n")
 			}
 		}
-		//fmt.Printf("%d\t finish received commit\n", kv.me)
 	}
 }
 
@@ -132,68 +125,53 @@ func (kv *KVServer) ReceiveChan() {
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	// TODO
-	//fmt.Printf("%s start put append\n",args.Name)
+
 	reply.Err = "not been modified"
 
 	kv.mu.Lock()
-	//fmt.Printf("start out\n")
-	//fmt.Printf("%s stage 1\n",args.Name)
 	kv.clientChan[args.Name] = make(chan Args)
-	//fmt.Printf("finish out\n")
+	cchan := kv.clientChan[args.Name]
 	kv.mu.Unlock()
-	//defer fmt.Printf("finish append\n")
+
 	defer func() {
-		//fmt.Printf("%s start out\n",args.Name)
 		kv.mu.Lock()
-		//fmt.Printf("%s start out\n",args.Name)
-		delete(kv.clientChan,args.Name)
+		if kv.clientChan != nil {
+			delete(kv.clientChan, args.Name)
+		}
 		kv.mu.Unlock()
-		//fmt.Printf("%s finish out\n",args.Name)
 	}()
-	//fmt.Printf("%s stage 2\n",args.Name)
-	//fmt.Printf("start put append\n")
-	//defer fmt.Printf("finish put append\n")
 	op := Op{Key: args.Key,
 		Value:       args.Value,
 		Op:          args.Op,
 		Name:        args.Name,
 		ClientIndex: args.ClientIndex}
-	
+
 	_, term, isLeader := kv.rf.Start(op)
-	
-	
-	//fmt.Printf("start put append\n")
+
 	if !isLeader {
-		//fmt.Printf("is not leader\n")
 		reply.WrongLeader = true
 		reply.Err = "Is Not Leader"
-		//fmt.Printf("not leader\n")
-		
 		return
-	} 
-	//fmt.Printf("%s waiting\n",args.Name)
-	
+	}
+
 	for {
 		//var result Args
 		select {
-			case result:=  <- kv.clientChan[args.Name]:
-				if(result.ClientIndex == args.ClientIndex && result.Name == args.Name ){
-					reply.WrongLeader = false
-					return
-				}
-				if(result.Term > term){
-					reply.WrongLeader = true
-					reply.Err = "Change Term"
-					return
-				}
-			case <-time.After(time.Millisecond*200):
-					reply.WrongLeader = true
-					return
+		case result := <-cchan:
+			if result.ClientIndex == args.ClientIndex && result.Name == args.Name {
+				reply.WrongLeader = false
+				return
+			}
+			if result.Term > term {
+				reply.WrongLeader = true
+				reply.Err = "Change Term"
+				return
+			}
+		case <-time.After(time.Millisecond * 200):
+			reply.WrongLeader = true
+			return
 		}
-		//result := <- kv.clientChan[args.Name]
-		//fmt.Printf("%s have entries\n",args.Name)
-		
-		
+
 	}
 
 }
@@ -230,7 +208,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
-	
 	kv.prevTerm = -1
 	// You may need initialization code here.
 
