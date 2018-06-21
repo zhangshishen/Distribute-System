@@ -232,6 +232,10 @@ func (rf *Raft) waitForElection(i int) {
 
 func (rf *Raft) startElection() {
 	rf.mu.Lock()
+	if(rf.state!=1){
+		rf.mu.Unlock()
+		return
+	}
 	rf.state = 1
 	rf.term++
 	rf.voteFor = rf.me
@@ -363,7 +367,7 @@ func (rf *Raft) persist() {
 	e.Encode(rf.log)
 	e.Encode(rf.term)
 	e.Encode(rf.curHaveLog)
-	e.Encode(rf.commitIndex)
+	//e.Encode(rf.commitIndex)
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
 }
@@ -383,7 +387,7 @@ func (rf *Raft) readPersist(data []byte) {
 	d.Decode(&rf.log)
 	d.Decode(&rf.term)
 	d.Decode(&rf.curHaveLog)
-	d.Decode(&rf.commitIndex)
+	//d.Decode(&rf.commitIndex)
 }
 
 //
